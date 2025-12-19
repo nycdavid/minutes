@@ -128,52 +128,6 @@ func (s *session) durationString() string {
 	return fmt.Sprintf("%vh%vm%vs", s.duration.Hours(), s.duration.Minutes(), s.duration.Seconds())
 }
 
-type (
-	dataCollector struct {
-		hbchan chan heartbeat
-	}
-
-	heartbeat struct {
-		app       string
-		timestamp time.Time
-	}
-
-	dataCollectorMod func(*dataCollector)
-)
-
-func WithHeartbeatChannel(hbchan chan heartbeat) dataCollectorMod {
-	return func(dataCollector *dataCollector) {
-		dataCollector.hbchan = hbchan
-	}
-}
-
-func NewDataCollector(opts ...dataCollectorMod) *dataCollector {
-	dc := &dataCollector{}
-
-	for _, opt := range opts {
-		opt(dc)
-	}
-
-	if dc.hbchan == nil {
-		dc.hbchan = make(chan heartbeat)
-	}
-
-	return dc
-}
-
-func (d *dataCollector) run() {
-	for {
-		select {
-		case v, ok := <-d.hbchan:
-			if !ok {
-				return
-			}
-
-			fmt.Println(v)
-		}
-	}
-}
-
 func main() {
 	var lastPrinted string
 	var lastChromeURL string
