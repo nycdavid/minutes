@@ -111,6 +111,69 @@ func chromeActiveURL() (string, error) {
 	return strings.TrimSpace(out.String()), nil
 }
 
+type (
+	session struct {
+		app      string
+		duration time.Duration
+		metadata map[string]string
+	}
+)
+
+func toSession(line string) *session {
+	fmt.Println(line)
+	return &session{}
+}
+
+func (s *session) durationString() string {
+	return fmt.Sprintf("%vh%vm%vs", s.duration.Hours(), s.duration.Minutes(), s.duration.Seconds())
+}
+
+type (
+	dataCollector struct {
+		hbchan chan heartbeat
+	}
+
+	heartbeat struct {
+		app       string
+		timestamp time.Time
+	}
+
+	dataCollectorMod func(*dataCollector)
+)
+
+func WithHeartbeatChannel(hbchan chan heartbeat) dataCollectorMod {
+	return func(dataCollector *dataCollector) {
+		dataCollector.hbchan = hbchan
+	}
+}
+
+func NewDataCollector(opts ...dataCollectorMod) *dataCollector {
+	dc := &dataCollector{}
+
+	for _, opt := range opts {
+		opt(dc)
+	}
+
+	if dc.hbchan == nil {
+		dc.hbchan = make(chan heartbeat)
+	}
+
+	return dc
+}
+
+func (d *dataCollector) run() {
+	for {
+		select {
+		case v, ok := <-d.hbchan:
+			if !ok {
+				return
+			}
+
+			fmt.Println(v)
+		}
+	}
+}
+
 func main() {
 	var lastPrinted string
 	var lastChromeURL string
@@ -142,7 +205,7 @@ func main() {
 						}
 					} else if url != "" && url != lastChromeURL {
 						lastChromeURL = url
-						fmt.Println(fmt.Sprintf("%s - URL: %s", info, url))
+						info = fmt.Sprintf("%s - URL: %s", info, url)
 					}
 				}
 			} else {
@@ -150,6 +213,9 @@ func main() {
 				fmt.Println(info)
 				lastChromeURL = ""
 			}
+
+			s := toSession(info)
+			fmt.Println(fmt.Sprintf("[app]: %s, [duration]: %s", s.app, s.duration))
 		}
 
 		time.Sleep(250 * time.Millisecond)
