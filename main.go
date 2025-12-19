@@ -126,31 +126,30 @@ func main() {
 		// Only print on change (reduces spam).
 		if info != lastPrinted {
 			lastPrinted = info
-			fmt.Println(info)
-		}
+			// If Chrome is focused, fetch URL (throttled).
+			// "Google Chrome" is the localized app name; adjust if you use Chrome Beta/Canary.
+			if strings.HasPrefix(info, "Google Chrome") {
+				if time.Since(lastChromeFetch) >= 2*time.Second {
+					lastChromeFetch = time.Now()
 
-		// If Chrome is focused, fetch URL (throttled).
-		// "Google Chrome" is the localized app name; adjust if you use Chrome Beta/Canary.
-		if strings.HasPrefix(info, "Google Chrome") {
-			if time.Since(lastChromeFetch) >= 2*time.Second {
-				lastChromeFetch = time.Now()
-
-				url, err := chromeActiveURL()
-				if err != nil {
-					// Print once if it changes (or on first failure).
-					msg := "Chrome URL error: " + err.Error()
-					if msg != lastChromeURL {
-						lastChromeURL = msg
-						fmt.Println(msg)
+					url, err := chromeActiveURL()
+					if err != nil {
+						// Print once if it changes (or on first failure).
+						msg := "Chrome URL error: " + err.Error()
+						if msg != lastChromeURL {
+							lastChromeURL = msg
+							fmt.Println(msg)
+						}
+					} else if url != "" && url != lastChromeURL {
+						lastChromeURL = url
+						fmt.Println(fmt.Sprintf("%s - URL: %s", info, url))
 					}
-				} else if url != "" && url != lastChromeURL {
-					lastChromeURL = url
-					fmt.Println("URL:", url)
 				}
+			} else {
+				// Reset chrome URL state when leaving Chrome.
+				fmt.Println(info)
+				lastChromeURL = ""
 			}
-		} else {
-			// Reset chrome URL state when leaving Chrome.
-			lastChromeURL = ""
 		}
 
 		time.Sleep(250 * time.Millisecond)
