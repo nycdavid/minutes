@@ -17,7 +17,6 @@ static pid_t FrontmostNormalWindowPID() {
         CFDictionaryRef w = CFArrayGetValueAtIndex(list, i);
         if (!w) continue;
 
-        // layer 0 => normal app windows (filters out overlays like BetterTouchTool)
         CFNumberRef layerRef = CFDictionaryGetValue(w, kCGWindowLayer);
         int layer = -1;
         if (layerRef) CFNumberGetValue(layerRef, kCFNumberIntType, &layer);
@@ -35,6 +34,7 @@ static pid_t FrontmostNormalWindowPID() {
     return 0;
 }
 
+// Returns "AppName — Title" (title may be omitted if not available).
 char* FrontmostAppAndAXTitle() {
     @autoreleasepool {
         pid_t pid = FrontmostNormalWindowPID();
@@ -44,7 +44,7 @@ char* FrontmostAppAndAXTitle() {
         NSString *appName = app ? [app localizedName] : @"(unknown app)";
 
         AXUIElementRef appRef = AXUIElementCreateApplication(pid);
-        if (!appRef) return strdup([[appName description] UTF8String]);
+        if (!appRef) return strdup([appName UTF8String]);
 
         CFTypeRef winValue = NULL;
         AXError winErr = AXUIElementCopyAttributeValue(appRef, kAXFocusedWindowAttribute, &winValue);
@@ -74,7 +74,10 @@ char* FrontmostAppAndAXTitle() {
 import "C"
 
 import (
+	"bytes"
 	"fmt"
+	"os/exec"
+	"strings"
 	"time"
 	"unsafe"
 )
@@ -88,9 +91,68 @@ func frontmostAppAndTitle() string {
 	return C.GoString(s)
 }
 
+// Returns active tab URL from Chrome using osascript.
+// Requires Automation permission: your app controlling "Google Chrome".
+func chromeActiveURL() (string, error) {
+	// Keep it single-line output.
+	script := `tell application "Google Chrome" to get URL of active tab of front window`
+	cmd := exec.Command("/usr/bin/osascript", "-e", script)
+
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		// If permission is missing, stderr usually contains a helpful message.
+		return "", fmt.Errorf("osascript failed: %v: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	return strings.TrimSpace(out.String()), nil
+}
+
 func main() {
+	var lastPrinted string
+	var lastChromeURL string
+	var lastChromeFetch time.Time
+
 	for {
-		fmt.Println(frontmostAppAndTitle())
-		time.Sleep(1 * time.Second)
+		info := frontmostAppAndTitle()
+		if info == "" {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		// Only print on change (reduces spam).
+		if info != lastPrinted {
+			lastPrinted = info
+			fmt.Println(info)
+		}
+
+		// If Chrome is focused, fetch URL (throttled).
+		// "Google Chrome" is the localized app name; adjust if you use Chrome Beta/Canary.
+		if strings.HasPrefix(info, "Google Chrome") {
+			if time.Since(lastChromeFetch) >= 2*time.Second {
+				lastChromeFetch = time.Now()
+
+				url, err := chromeActiveURL()
+				if err != nil {
+					// Print once if it changes (or on first failure).
+					msg := "Chrome URL error: " + err.Error()
+					if msg != lastChromeURL {
+						lastChromeURL = msg
+						fmt.Println(msg)
+					}
+				} else if url != "" && url != lastChromeURL {
+					lastChromeURL = url
+					fmt.Println("URL:", url)
+				}
+			}
+		} else {
+			// Reset chrome URL state when leaving Chrome.
+			lastChromeURL = ""
+		}
+
+		time.Sleep(250 * time.Millisecond)
 	}
 }
