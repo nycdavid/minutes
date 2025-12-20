@@ -9,8 +9,8 @@ generate-migration:
 
 .PHONY: migrate-all-up
 migrate-all-up:
-	ENV="dev" go run ./cmd/migrate
-	ENV="test" go run ./cmd/migrate
+	ENV="dev" go run ./cmd/migrate up
+	ENV="test" go run ./cmd/migrate up
 
 .PHONY: migrate-all-down
 migrate-all-down:

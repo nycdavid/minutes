@@ -34,9 +34,11 @@ func main() {
 		if err := m.Down(); err != nil {
 			panic(err)
 		}
-	} else {
+	} else if direction == "up" {
 		if err := m.Up(); err != nil {
 			panic(err)
 		}
+	} else {
+		panic("invalid direction")
 	}
 }
