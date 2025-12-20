@@ -4,6 +4,6 @@ CREATE TABLE sessions (
     start_timestamp INTEGER NOT NULL,
     end_timestamp INTEGER NOT NULL,
 
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
 );
