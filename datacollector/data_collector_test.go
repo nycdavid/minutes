@@ -2,6 +2,7 @@ package datacollector_test
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -24,11 +25,15 @@ func Test_Run(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert := _assert.New(t)
+			sqliteFpath := os.Getenv("TEST_DB_URL")
 
 			hbc := make(chan datacollector.Heartbeat, 1)
 			hbc <- datacollector.Heartbeat{App: "Ableton", Timestamp: time.Now()}
 			close(hbc)
-			dc := datacollector.New(datacollector.WithHeartbeatChannel(hbc))
+			dc := datacollector.New(
+				datacollector.WithHeartbeatChannel(hbc),
+				datacollector.WithSQLiteFilePath(sqliteFpath),
+			)
 
 			dc.Run()
 
@@ -39,8 +44,6 @@ func Test_Run(t *testing.T) {
 }
 
 func Test_Flush(t *testing.T) {
-	t.Setenv("ENV", "test")
-
 	tests := []struct {
 		name string
 	}{
@@ -52,7 +55,7 @@ func Test_Flush(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert := _assert.New(t)
-			sqliteFpath := "../db.test.sqlite"
+			sqliteFpath := os.Getenv("TEST_DB_URL")
 			d, err := gorm.Open(sqlite.Open(sqliteFpath), &gorm.Config{})
 			d.Exec("DELETE FROM sessions;")
 

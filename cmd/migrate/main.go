@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -17,13 +18,17 @@ func main() {
 	}
 
 	direction := os.Args[1]
-	fmt.Println(direction)
+	dbURL := os.Args[2]
+
+	if dbURL == "" {
+		fmt.Println("db url not set, skipping...")
+	}
 
 	fmt.Println(fmt.Sprintf("[%s] Running migrations...", env))
 
 	m, err := migrate.New(
 		"file://db/migrations",
-		fmt.Sprintf("sqlite3://db.%s.sqlite", env),
+		fmt.Sprintf("sqlite3://%s", dbURL),
 	)
 
 	if err != nil {
@@ -36,7 +41,11 @@ func main() {
 		}
 	} else if direction == "up" {
 		if err := m.Up(); err != nil {
-			panic(err)
+			if errors.Is(err, migrate.ErrNoChange) {
+				fmt.Println("no changes")
+			} else {
+				panic(err)
+			}
 		}
 	} else {
 		panic("invalid direction")
