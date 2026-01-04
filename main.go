@@ -39,12 +39,14 @@ static pid_t FrontmostNormalWindowPID() {
 // Returns "AppName — Title" (title may be omitted if not available).
 char* FrontmostAppAndAXTitle() {
     @autoreleasepool {
-        pid_t pid = FrontmostNormalWindowPID();
-        if (pid == 0) return NULL;
+        // 1) Frontmost app WITHOUT screen-recording / window-list APIs
+        NSRunningApplication *front = [[NSWorkspace sharedWorkspace] frontmostApplication];
+        if (!front) return NULL;
 
-        NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
-        NSString *appName = app ? [app localizedName] : @"(unknown app)";
+        pid_t pid = front.processIdentifier;
+        NSString *appName = front.localizedName ?: @"(unknown app)";
 
+        // 2) AX for the focused window title (requires Accessibility permission)
         AXUIElementRef appRef = AXUIElementCreateApplication(pid);
         if (!appRef) return strdup([appName UTF8String]);
 
@@ -59,13 +61,17 @@ char* FrontmostAppAndAXTitle() {
             CFTypeRef titleValue = NULL;
             AXError titleErr = AXUIElementCopyAttributeValue(winRef, kAXTitleAttribute, &titleValue);
 
-            if (titleErr == kAXErrorSuccess && titleValue && CFGetTypeID(titleValue) == CFStringGetTypeID()) {
+            if (titleErr == kAXErrorSuccess && titleValue &&
+                CFGetTypeID(titleValue) == CFStringGetTypeID()) {
+
                 NSString *title = (__bridge NSString*)titleValue;
-                out = [NSString stringWithFormat:@"%@ — %@", appName, title];
+                if (title.length > 0) {
+                    out = [NSString stringWithFormat:@"%@ — %@", appName, title];
+                }
                 CFRelease(titleValue);
             }
 
-            CFRelease(winRef);
+            CFRelease(winRef); // releases winValue
         }
 
         CFRelease(appRef);
