@@ -82,6 +82,8 @@ import (
 	"strings"
 	"time"
 	"unsafe"
+
+	"github.com/nycdavid/minutes/internal/idle"
 )
 
 func frontmostAppAndTitle() string {
@@ -130,15 +132,26 @@ func (s *session) durationString() string {
 	return fmt.Sprintf("%vh%vm%vs", s.duration.Hours(), s.duration.Minutes(), s.duration.Seconds())
 }
 
+var (
+	idleThreshold = 30 * time.Second
+	loopInterval  = 500 * time.Millisecond
+)
+
 func main() {
 	var lastPrinted string
 	var lastChromeURL string
 	var lastChromeFetch time.Time
 
 	for {
+		if idle.IsIdle(idleThreshold) {
+			fmt.Println("Idle...")
+			time.Sleep(loopInterval)
+			continue
+		}
+
 		info := frontmostAppAndTitle()
 		if info == "" {
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(loopInterval)
 			continue
 		}
 
@@ -174,6 +187,6 @@ func main() {
 			fmt.Println(fmt.Sprintf("[app]: %s, [duration]: %s", s.app, s.duration))
 		}
 
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(loopInterval)
 	}
 }
