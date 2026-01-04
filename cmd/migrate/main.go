@@ -22,9 +22,10 @@ func main() {
 
 	if dbURL == "" {
 		fmt.Println("db url not set, skipping...")
+		return
 	}
 
-	fmt.Println(fmt.Sprintf("[%s] Running migrations...", env))
+	fmt.Print(fmt.Sprintf("[%s] Running migrations.... ", env))
 
 	m, err := migrate.New(
 		"file://db/migrations",
