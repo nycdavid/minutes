@@ -51,4 +51,6 @@ func main() {
 	} else {
 		panic("invalid direction")
 	}
+
+	fmt.Println("done")
 }
