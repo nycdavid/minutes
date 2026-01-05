@@ -11,7 +11,7 @@ package idle
 uint64_t hidIdleTimeNanos() {
     io_iterator_t iter = 0;
     io_registry_entry_t entry = 0;
-    kern_return_t kr = IOServiceGetMatchingServices(kIOMasterPortDefault,
+    kern_return_t kr = IOServiceGetMatchingServices(kIOMainPortDefault,
         IOServiceMatching("IOHIDSystem"), &iter);
     if (kr != KERN_SUCCESS || iter == 0) return 0;
 
