@@ -83,13 +83,19 @@ import "C"
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 	"unsafe"
 
 	"github.com/nycdavid/minutes/internal/idle"
+	"github.com/nycdavid/minutes/models"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func frontmostAppAndTitle() string {
@@ -127,11 +133,18 @@ type (
 		duration time.Duration
 		metadata map[string]string
 	}
+
+	heartbeat struct {
+		app       string
+		timestamp int64
+		metadata  string
+	}
 )
 
-func toSession(line string) *session {
-	fmt.Println(line)
-	return &session{}
+func toSession(line string) *models.Heartbeat {
+	parts := strings.Split(line, " — ")
+	app := parts[0]
+	return &models.Heartbeat{Application: app, Timestamp: time.Now().UTC().UnixMilli(), Metadata: parts[1]}
 }
 
 func (s *session) durationString() string {
@@ -189,8 +202,19 @@ func main() {
 				lastChromeURL = ""
 			}
 
+			sqliteFpath := os.Getenv("DB_URL")
+			d, err := gorm.Open(sqlite.Open(sqliteFpath), &gorm.Config{})
+			if err != nil {
+				log.Fatal(err)
+			}
+
 			s := toSession(info)
-			fmt.Println(fmt.Sprintf("[app]: %s, [duration]: %s", s.app, s.duration))
+			err = gorm.G[models.Heartbeat](d).Create(context.Background(), s)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			fmt.Println(fmt.Sprintf("[app]: %s, \n[timestamp]: %s, \n[metadata]: %s\n\n", s.Application, s.Timestamp, s.Metadata))
 		}
 
 		time.Sleep(loopInterval)
