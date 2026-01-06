@@ -127,28 +127,10 @@ func chromeActiveURL() (string, error) {
 	return strings.TrimSpace(out.String()), nil
 }
 
-type (
-	session struct {
-		app      string
-		duration time.Duration
-		metadata map[string]string
-	}
-
-	heartbeat struct {
-		app       string
-		timestamp int64
-		metadata  string
-	}
-)
-
 func toSession(line string) *models.Heartbeat {
 	parts := strings.Split(line, " — ")
 	app := parts[0]
 	return &models.Heartbeat{Application: app, Timestamp: time.Now().UTC().UnixMilli(), Metadata: parts[1]}
-}
-
-func (s *session) durationString() string {
-	return fmt.Sprintf("%vh%vm%vs", s.duration.Hours(), s.duration.Minutes(), s.duration.Seconds())
 }
 
 var (
