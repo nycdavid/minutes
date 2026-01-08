@@ -7,10 +7,22 @@
 
 #import <Foundation/Foundation.h>
 
-int main(int argc, const char * argv[]) {
-    @autoreleasepool {
-        // insert code here...
-        NSLog(@"Hello, World!");
+int FrontmostAppName(char* buf, int bufLen) {
+    if (!buf || bufLen <= 0) {
+        return -1;
     }
-    return EXIT_SUCCESS;
+    
+    @autoreleasepool {
+        NSString *a = @"Hello from Objective-C";
+        const char *utf8 = [a UTF8String];
+        
+        if (!utf8) {
+            return -2;
+        }
+        
+        strncpy(buf, utf8, bufLen - 1);
+        buf[bufLen - 1] = '\0';
+    }
+    
+    return 0;
 }
