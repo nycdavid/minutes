@@ -10,73 +10,81 @@ package main
 #import <CoreFoundation/CoreFoundation.h>
 #import <stdlib.h>
 
-static pid_t FrontmostNormalWindowPID() {
-    CFArrayRef list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
-    if (!list) return 0;
+static NSString *AXCopyStringAttr(AXUIElementRef ref, CFStringRef attr) {
+   CFTypeRef v = NULL;
+   AXError e = AXUIElementCopyAttributeValue(ref, attr, &v);
+   if (e != kAXErrorSuccess || !v) return nil;
 
-    CFIndex count = CFArrayGetCount(list);
-    for (CFIndex i = 0; i < count; i++) {
-        CFDictionaryRef w = CFArrayGetValueAtIndex(list, i);
-        if (!w) continue;
-
-        CFNumberRef layerRef = CFDictionaryGetValue(w, kCGWindowLayer);
-        int layer = -1;
-        if (layerRef) CFNumberGetValue(layerRef, kCFNumberIntType, &layer);
-        if (layer != 0) continue;
-
-        CFNumberRef pidRef = CFDictionaryGetValue(w, kCGWindowOwnerPID);
-        int pid = 0;
-        if (pidRef && CFNumberGetValue(pidRef, kCFNumberIntType, &pid)) {
-            CFRelease(list);
-            return (pid_t)pid;
-        }
-    }
-
-    CFRelease(list);
-    return 0;
+   NSString *s = nil;
+   if (CFGetTypeID(v) == CFStringGetTypeID()) {
+       s = (__bridge NSString *)v;
+   }
+   CFRelease(v);
+   return s;
 }
 
-// Returns "AppName — Title" (title may be omitted if not available).
-char* FrontmostAppAndAXTitle() {
-    @autoreleasepool {
-        // 1) Frontmost app WITHOUT screen-recording / window-list APIs
-        NSRunningApplication *front = [[NSWorkspace sharedWorkspace] frontmostApplication];
-        if (!front) return NULL;
+char* FrontmostAppAndHeaderTitle(void) {
+   @autoreleasepool {
+       // If AX isn't trusted, you will not get stable focused element/window/title.
+       if (!AXIsProcessTrusted()) {
+           NSRunningApplication *front = [[NSWorkspace sharedWorkspace] frontmostApplication];
+           if (!front) return NULL;
+           NSString *appName = front.localizedName ?: @"(unknown app)";
+           return strdup(appName.UTF8String);
+       }
 
-        pid_t pid = front.processIdentifier;
-        NSString *appName = front.localizedName ?: @"(unknown app)";
+       AXUIElementRef sys = AXUIElementCreateSystemWide();
+       if (!sys) return NULL;
 
-        // 2) AX for the focused window title (requires Accessibility permission)
-        AXUIElementRef appRef = AXUIElementCreateApplication(pid);
-        if (!appRef) return strdup([appName UTF8String]);
+       // 1) Focused UI element (more reliable than focused window)
+       AXUIElementRef focusedElem = NULL;
+       AXError fe = AXUIElementCopyAttributeValue(
+           sys,
+           kAXFocusedUIElementAttribute,
+           (CFTypeRef *)&focusedElem
+       );
+       CFRelease(sys);
 
-        CFTypeRef winValue = NULL;
-        AXError winErr = AXUIElementCopyAttributeValue(appRef, kAXFocusedWindowAttribute, &winValue);
+       if (fe != kAXErrorSuccess || !focusedElem) return NULL;
 
-        NSString *out = appName;
+       // 2) Get its window
+       AXUIElementRef winRef = NULL;
+       AXError we = AXUIElementCopyAttributeValue(
+           focusedElem,
+           kAXWindowAttribute,
+           (CFTypeRef *)&winRef
+       );
+       CFRelease(focusedElem);
 
-        if (winErr == kAXErrorSuccess && winValue) {
-            AXUIElementRef winRef = (AXUIElementRef)winValue;
+       // If we can't get a window, fall back to frontmost app name
+       if (we != kAXErrorSuccess || !winRef) {
+           NSRunningApplication *front = [[NSWorkspace sharedWorkspace] frontmostApplication];
+           if (!front) return NULL;
+           NSString *appName = front.localizedName ?: @"(unknown app)";
+           return strdup(appName.UTF8String);
+       }
 
-            CFTypeRef titleValue = NULL;
-            AXError titleErr = AXUIElementCopyAttributeValue(winRef, kAXTitleAttribute, &titleValue);
+       // 3) Derive app name from the window's PID (keeps app+title consistent)
+       pid_t pid = 0;
+       AXUIElementGetPid(winRef, &pid);
+       NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+       NSString *appName = app.localizedName ?: @"(unknown app)";
 
-            if (titleErr == kAXErrorSuccess && titleValue &&
-                CFGetTypeID(titleValue) == CFStringGetTypeID()) {
+       // 4) Title, with fallback to Document (often better for editors/browsers)
+       NSString *title = AXCopyStringAttr(winRef, kAXTitleAttribute);
+       if (title.length == 0) {
+           // Some apps populate Document when Title is empty/stale.
+           title = AXCopyStringAttr(winRef, kAXDocumentAttribute);
+       }
 
-                NSString *title = (__bridge NSString*)titleValue;
-                if (title.length > 0) {
-                    out = [NSString stringWithFormat:@"%@ — %@", appName, title];
-                }
-                CFRelease(titleValue);
-            }
+       NSString *out = appName;
+       if (title.length > 0) {
+           out = [NSString stringWithFormat:@"%@ — %@", appName, title];
+       }
 
-            CFRelease(winRef); // releases winValue
-        }
-
-        CFRelease(appRef);
-        return strdup([out UTF8String]);
-    }
+       CFRelease(winRef);
+       return strdup(out.UTF8String);
+   }
 }
 */
 import "C"
@@ -86,6 +94,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -99,7 +108,7 @@ import (
 )
 
 func frontmostAppAndTitle() string {
-	s := C.FrontmostAppAndAXTitle()
+	s := C.FrontmostAppAndHeaderTitle()
 	if s == nil {
 		return ""
 	}
@@ -135,17 +144,16 @@ func toSession(line string) *models.Heartbeat {
 
 var (
 	idleThreshold = 30 * time.Second
-	loopInterval  = 500 * time.Millisecond
+	loopInterval  = 30 * time.Second
 )
 
 func main() {
-	var lastPrinted string
 	var lastChromeURL string
 	var lastChromeFetch time.Time
 
 	for {
 		if idle.IsIdle(idleThreshold) {
-			fmt.Println("Idle...")
+			slog.Info("Idle...")
 			time.Sleep(loopInterval)
 			continue
 		}
@@ -156,48 +164,48 @@ func main() {
 			continue
 		}
 
-		// Only print on change (reduces spam).
-		if info != lastPrinted {
-			lastPrinted = info
-			// If Chrome is focused, fetch URL (throttled).
-			// "Google Chrome" is the localized app name; adjust if you use Chrome Beta/Canary.
-			if strings.HasPrefix(info, "Google Chrome") {
-				if time.Since(lastChromeFetch) >= 2*time.Second {
-					lastChromeFetch = time.Now()
+		// If Chrome is focused, fetch URL (throttled).
+		// "Google Chrome" is the localized app name; adjust if you use Chrome Beta/Canary.
+		if strings.HasPrefix(info, "Google Chrome") {
+			if time.Since(lastChromeFetch) >= 2*time.Second {
+				lastChromeFetch = time.Now()
 
-					url, err := chromeActiveURL()
-					if err != nil {
-						// Print once if it changes (or on first failure).
-						msg := "Chrome URL error: " + err.Error()
-						if msg != lastChromeURL {
-							lastChromeURL = msg
-							fmt.Println(msg)
-						}
-					} else if url != "" && url != lastChromeURL {
-						lastChromeURL = url
-						info = fmt.Sprintf("%s - URL: %s", info, url)
+				url, err := chromeActiveURL()
+				if err != nil {
+					// Print once if it changes (or on first failure).
+					msg := "Chrome URL error: " + err.Error()
+					if msg != lastChromeURL {
+						lastChromeURL = msg
+						slog.Error("getting Chrome URL", "msg", msg)
 					}
+				} else if url != "" && url != lastChromeURL {
+					lastChromeURL = url
+					info = fmt.Sprintf("%s - URL: %s", info, url)
 				}
-			} else {
-				// Reset chrome URL state when leaving Chrome.
-				fmt.Println(info)
-				lastChromeURL = ""
 			}
-
-			sqliteFpath := os.Getenv("DB_URL")
-			d, err := gorm.Open(sqlite.Open(sqliteFpath), &gorm.Config{})
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			s := toSession(info)
-			err = gorm.G[models.Heartbeat](d).Create(context.Background(), s)
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			fmt.Println(fmt.Sprintf("[app]: %s, \n[timestamp]: %s, \n[metadata]: %s\n\n", s.Application, s.Timestamp, s.Metadata))
+		} else {
+			// Reset chrome URL state when leaving Chrome.
+			lastChromeURL = ""
 		}
+
+		sqliteFpath := os.Getenv("DB_URL")
+		d, err := gorm.Open(sqlite.Open(sqliteFpath), &gorm.Config{})
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		s := toSession(info)
+		err = gorm.G[models.Heartbeat](d).Create(context.Background(), s)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		slog.Info(
+			"heartbeat sent",
+			"app", s.Application,
+			"timestamp", s.Timestamp,
+			"metadata", s.Metadata,
+		)
 
 		time.Sleep(loopInterval)
 	}
